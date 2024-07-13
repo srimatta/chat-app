@@ -1,25 +1,76 @@
 import os
 import sys
 
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI
 
 from app.documents_ingestion import get_vector_db
 from app.re_ranker import get_re_ranker
 
+def pretty_print_docs(docs):
+    print("pretty_print_docs:")
+    print(
+        f"\n{'-' * 100}\n".join(
+            [f"Document {i+1}:\n\n" + d.page_content for i, d in enumerate(docs)]
+        )
+    )
+
 if __name__ == '__main__':
     os.environ["OPENAI_API_KEY"] = ''
 
-    llm = ChatOpenAI(temperature=0.0, model_name='gpt-3.5-turbo')
-    vectordb = get_vector_db()
-    retriever = vectordb.as_retriever(search_kwargs={'k': 3})
-    compression_retriever = get_re_ranker(retriever)
-    chain = ConversationalRetrievalChain.from_llm(
-        llm,
-        retriever=compression_retriever,
-        return_source_documents=True,
-        verbose=True
+    from langchain.globals import set_debug
+    #set_debug(True)
+
+    llm = ChatOpenAI(temperature=0, model_name='gpt-3.5-turbo')
+    vectordb = get_vector_db(source_docs_folder='/Users/srinivas_work/Desktop/apps/chat-app/chat-app/docs/')
+    retriever_ = vectordb.as_retriever(search_kwargs={'k': 3})
+    compression_retriever = get_re_ranker(retriever_)
+
+    compressor = LLMChainExtractor.from_llm(llm)
+
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, base_retriever=retriever_
     )
+
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
+
+    template = """
+    System Instructions:
+    You are helpful assistant, you respond to Question based on the 'context' given to you. Dont make up the answer.
+    If you don't find the answer in 'context', Say 'I dont know'
+    
+    Context:
+    {context}
+
+    Question:
+    {question}
+
+    Answer:
+    """
+
+    # Create the PromptTemplate instance
+    prompt = PromptTemplate(
+        input_variables=["context", "question"],
+        template=template,
+    )
+
+    from langchain_core.runnables import RunnableParallel
+
+    rag_chain_from_docs = (
+            RunnablePassthrough.assign(context=(lambda x: format_docs(x["context"])))
+            | prompt
+            | llm
+            | StrOutputParser()
+    )
+
+    rag_chain_with_source = RunnableParallel(
+        {"context": compression_retriever, "question": RunnablePassthrough()}
+    ).assign(answer=rag_chain_from_docs)
 
     yellow = "\033[0;33m"
     green = "\033[0;32m"
@@ -36,7 +87,6 @@ if __name__ == '__main__':
             sys.exit()
         if query == '':
             continue
-        result = chain.invoke(
-            {"question": query, "chat_history": chat_history})
-        print(f"{white}Answer: " + result["answer"])
-        chat_history.append((query, result["answer"]))
+        result = rag_chain_with_source.invoke(query)
+        print(f"{white}Answer: " ,  result['answer'])
+        print(f"{white}Sources: ", result['context'])
