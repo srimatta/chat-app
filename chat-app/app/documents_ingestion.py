@@ -26,7 +26,7 @@ def get_vector_db(source_docs_folder = "chat-app/docs"):
             documents.extend(loader.load())
 
     # Split the documents into smaller chunks
-    text_splitter = CharacterTextSplitter(chunk_size=25, chunk_overlap=5)
+    text_splitter = CharacterTextSplitter(chunk_size=200, chunk_overlap=50)
     documents = text_splitter.split_documents(documents)
 
     # Convert the document chunks to embedding and save them to the vector store

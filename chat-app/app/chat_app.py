@@ -23,11 +23,19 @@ if __name__ == '__main__':
     os.environ["OPENAI_API_KEY"] = ''
 
     from langchain.globals import set_debug
-    #set_debug(True)
+    # set_debug(True)
+    import phoenix as px
+    from phoenix.trace.langchain import LangChainInstrumentor
 
-    llm = ChatOpenAI(temperature=0, model_name='gpt-3.5-turbo')
+    session = px.launch_app()
+    # Initialize Langchain auto-instrumentation
+    LangChainInstrumentor().instrument()
+
+    llm = ChatOpenAI(temperature=0, model_name='gpt-4o-mini', verbose=True, streaming=True)
     vectordb = get_vector_db(source_docs_folder='/Users/srinivas_work/Desktop/apps/chat-app/chat-app/docs/')
     retriever_ = vectordb.as_retriever(search_kwargs={'k': 3})
+
+
     compression_retriever = get_re_ranker(retriever_)
 
     compressor = LLMChainExtractor.from_llm(llm)
@@ -36,21 +44,15 @@ if __name__ == '__main__':
         base_compressor=compressor, base_retriever=retriever_
     )
 
+
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
     template = """
-    System Instructions:
-    You are helpful assistant, you respond to Question based on the 'context' given to you. Dont make up the answer.
-    If you don't find the answer in 'context', Say 'I dont know'
-    
-    Context:
+    Answer the question based only on the following context: 
     {context}
 
-    Question:
-    {question}
-
-    Answer:
+    Question: {question}
     """
 
     # Create the PromptTemplate instance
